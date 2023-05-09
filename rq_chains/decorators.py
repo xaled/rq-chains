@@ -3,6 +3,7 @@ from rq.decorators import job
 from rq.job import Job
 from rq.serializers import DefaultSerializer
 from functools import wraps
+from datetime import timedelta
 from typing import TYPE_CHECKING, Callable, Dict, Optional, List, Any, Union, Iterable
 from collections.abc import Collection
 import logging
@@ -59,8 +60,10 @@ class publisher(ChainsJobDecorator):  # noqa
                 subscriber_args, subscriber_kwargs = _subscriber_func.result_mapper(result)
                 rq_chains_opts = dict(predecessor=publisher_job.id,
                                       depth=current_depth + 1,
-                                      channel_id=_channel_id)
-                logger.info(f"enqueuing subscriber func subscriber={_subscriber_func=}, publisher={f.__name__}, "
+                                      channel_id=_channel_id,
+                                      delay_timedelta=_subscriber_func.delay_timedelta
+                                      )
+                logger.warning(f"enqueuing subscriber func subscriber={_subscriber_func=}, publisher={f.__name__}, "
                             f"channel_id={_channel_id}  {result=} {current_depth=}")
                 subscriber_job = _subscriber_func.delay(*subscriber_args, rq_chains_opts=rq_chains_opts,
                                                         **subscriber_kwargs)
@@ -127,6 +130,7 @@ class subscriber(ChainsJobDecorator):  # noqa
             result_mapper: Callable[[Any], Any] = lambda x: ((x,), {}),
             subscribe_condition: Callable[[Any], Any] = lambda x: True,  # Default: always true
             depth_limit: Optional[int] = 1000,
+            delay_timedelta: Optional[int | float | timedelta] = None,
             # meta: Optional[Dict[Any, Any]] = None,
             **job_kwargs
     ):
@@ -135,12 +139,15 @@ class subscriber(ChainsJobDecorator):  # noqa
         self.result_mapper = result_mapper
         self.subscribe_condition = subscribe_condition
         self.depth_limit = depth_limit
+        self.delay_timedelta = timedelta(seconds=delay_timedelta) if isinstance(delay_timedelta, (float, int)) \
+            else delay_timedelta
         job.__init__(self, queue, **job_kwargs)
 
     def __call__(self, f):
         f.subscribe_condition = self.subscribe_condition
         f.result_mapper = self.result_mapper
         f.depth_limit = self.depth_limit
+        f.delay_timedelta = self.delay_timedelta
         ret = ChainsJobDecorator.__call__(self, f)
 
         for channel_id in self.channel_ids:

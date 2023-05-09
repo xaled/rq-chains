@@ -21,6 +21,7 @@ class ChainsJobDecorator(job):
             meta['rq_chains_depth'] = rq_chains_opts.get('depth', 0)
             meta['rq_chains_channel_id'] = rq_chains_opts.get('channel_id', None)
             meta['rq_chains_successors'] = list()
+            delay_timedelta = rq_chains_opts.get('delay_timedelta', None)
 
             if not depends_on:
                 depends_on = self.depends_on
@@ -28,22 +29,26 @@ class ChainsJobDecorator(job):
             if not at_front:
                 at_front = self.at_front
 
+            job_opts = dict(args=args,
+                            kwargs=kwargs,
+                            timeout=self.timeout,
+                            result_ttl=self.result_ttl,
+                            ttl=self.ttl,
+                            depends_on=depends_on,
+                            job_id=job_id,
+                            at_front=at_front,
+                            meta=meta,
+                            description=self.description,
+                            failure_ttl=self.failure_ttl,
+                            retry=self.retry,
+                            on_failure=self.on_failure,
+                            on_success=self.on_success, )
+
+            if delay_timedelta:
+                return queue.enqueue_in(delay_timedelta, f, **job_opts)
             return queue.enqueue_call(
                 f,
-                args=args,
-                kwargs=kwargs,
-                timeout=self.timeout,
-                result_ttl=self.result_ttl,
-                ttl=self.ttl,
-                depends_on=depends_on,
-                job_id=job_id,
-                at_front=at_front,
-                meta=meta,
-                description=self.description,
-                failure_ttl=self.failure_ttl,
-                retry=self.retry,
-                on_failure=self.on_failure,
-                on_success=self.on_success,
+                **job_opts
             )
 
         f.delay = delay
