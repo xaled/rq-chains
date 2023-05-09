@@ -42,13 +42,20 @@ class publisher(ChainsJobDecorator):  # noqa
     def __call__(self, f):
         def notify_subscribers(result, publisher_job):
             def notify_subscriber_func(_subscriber_func, _channel_id):
+                # check depth limit
+                current_depth = publisher_job.meta.get('rq_chains_depth', 0)
+                if _subscriber_func.depth_limit is not None and current_depth >= _subscriber_func.depth_limit:
+                    logger.warning(f'Skipping notifying subscriber function (depth limit is reached) '
+                                   f'for job.id={get_current_job().id}, {_subscriber_func.__name__=}')
+                    return
+
+                # check subscribe condition
                 if not _subscriber_func.subscribe_condition(result):
                     logger.debug(
-                        f'skipping notifying subscriber function (subscriber condition is False) '
+                        f'Skipping notifying subscriber function (subscriber condition is False) '
                         f'for job.id={get_current_job().id}, {_subscriber_func.__name__=}')
                     return
 
-                current_depth = publisher_job.meta.get('rq_chains_depth', 0)
                 subscriber_args, subscriber_kwargs = _subscriber_func.result_mapper(result)
                 rq_chains_opts = dict(predecessor=publisher_job.id,
                                       depth=current_depth + 1,
@@ -119,6 +126,7 @@ class subscriber(ChainsJobDecorator):  # noqa
             channel_ids: Optional[Union[str, Iterable[str]]] = None,
             result_mapper: Callable[[Any], Any] = lambda x: ((x,), {}),
             subscribe_condition: Callable[[Any], Any] = lambda x: True,  # Default: always true
+            depth_limit: Optional[int] = 1000,
             # meta: Optional[Dict[Any, Any]] = None,
             **job_kwargs
     ):
@@ -126,11 +134,13 @@ class subscriber(ChainsJobDecorator):  # noqa
         self.channel_ids = _process_channel_ids(channel_ids)
         self.result_mapper = result_mapper
         self.subscribe_condition = subscribe_condition
+        self.depth_limit = depth_limit
         job.__init__(self, queue, **job_kwargs)
 
     def __call__(self, f):
         f.subscribe_condition = self.subscribe_condition
         f.result_mapper = self.result_mapper
+        f.depth_limit = self.depth_limit
         ret = ChainsJobDecorator.__call__(self, f)
 
         for channel_id in self.channel_ids:
@@ -147,13 +157,6 @@ def _process_channel_ids(channel_ids: Optional[Union[str, Iterable[str]]]):
     if isinstance(channel_ids, str):
         return channel_ids,
     return tuple(*channel_ids)
-
-
-# def _rq_chains_meta(meta):
-#     rq_chains_meta = dict(rq_chains_successors=[], rq_chains_predecessor=None, rq_chains_channel_id=None)
-#     meta = meta or dict()
-#     meta.update(rq_chains_meta)
-#     return meta
 
 
 def walk_job_chain(parent_job: "Job", depth=0):
