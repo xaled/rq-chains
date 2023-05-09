@@ -1,0 +1,19 @@
+version: '3.7'
+services:
+  rq-dashboard:
+    image: eoranged/rq-dashboard:legacy
+    environment:
+      - RQ_DASHBOARD_REDIS_URL=redis://redis:6379
+    ports:
+      - "127.0.0.1:9181:9181"
+  rq-worker:
+    image: rq-chains
+    command: rq worker -u redis://redis:6379 high normal low default
+    deploy:
+      replicas: 3
+    volumes:
+      - "./:/usr/src/app"
+  redis:
+    image: redis:alpine
+    ports:
+      - "127.0.0.1:6379:6379"
