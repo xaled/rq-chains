@@ -1,1 +1,2 @@
-from .decorators import publisher, subscriber, walk_job_chain
+from .decorators import publisher, subscriber
+from .walk import walk_job_chain

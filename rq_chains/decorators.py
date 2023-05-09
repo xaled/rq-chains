@@ -1,12 +1,13 @@
-from rq import get_current_job
-from rq.decorators import job
-from rq.job import Job
-from rq.serializers import DefaultSerializer
 from functools import wraps
 from datetime import timedelta
-from typing import TYPE_CHECKING, Callable, Dict, Optional, List, Any, Union, Iterable
+from typing import TYPE_CHECKING, Callable, Optional, Any, Union, Iterable
 from collections.abc import Collection
 import logging
+
+from rq import get_current_job
+from rq.decorators import job
+from rq.serializers import DefaultSerializer
+
 from .chains_job import ChainsJobDecorator
 import rq_chains.redis_ops as redis_ops
 
@@ -29,11 +30,27 @@ class publisher(ChainsJobDecorator):  # noqa
             redis_pubsub_channels: Optional[Union[str, Iterable[str]]] = None,
             redis_streams: Optional[Union[str, Iterable[str]]] = None,
             publish_condition: Callable[[Any], Any] = None,
-            # Default: anything except none or empty collection
-            # meta: Optional[Dict[Any, Any]] = None,
             **job_kwargs
     ):
-        # meta = _rq_chains_meta(meta)
+        """
+        A decorator class for RQ jobs to implement the publisher functionality in a publisher-subscriber model.
+
+        Args:
+            queue (Union[Queue, str]): The RQ queue instance or queue name to enqueue the job.
+            channel_ids (Optional[Union[str, Iterable[str]]], optional): An iterable of channel IDs to publish to
+                or a single channel ID as a string. Defaults to None.
+            redis_pubsub_channels (Optional[Union[str, Iterable[str]]], optional): An iterable of Redis PubSub
+                channel IDs to publish to or a single channel ID as a string. Defaults to None.
+            redis_streams (Optional[Union[str, Iterable[str]]], optional): An iterable of Redis Stream names to publish
+                to or a single stream name as a string. Defaults to None.
+            publish_condition (Callable[[Any], Any], optional): A function that determines whether the publisher should
+                publish its result. Defaults to a function returning the result as the first argument.
+            **job_kwargs: Additional keyword arguments to pass to the RQ job decorator.
+
+        Returns:
+            A RQ job wrapped function that publishes to the specified channels.
+        """
+
         self.channel_ids = _process_channel_ids(channel_ids)
         self.redis_pubsub_channels = _process_channel_ids(redis_pubsub_channels)
         self.redis_streams = _process_channel_ids(redis_streams)
@@ -64,7 +81,7 @@ class publisher(ChainsJobDecorator):  # noqa
                                       delay_timedelta=_subscriber_func.delay_timedelta
                                       )
                 logger.warning(f"enqueuing subscriber func subscriber={_subscriber_func=}, publisher={f.__name__}, "
-                            f"channel_id={_channel_id}  {result=} {current_depth=}")
+                               f"channel_id={_channel_id}  {result=} {current_depth=}")
                 subscriber_job = _subscriber_func.delay(*subscriber_args, rq_chains_opts=rq_chains_opts,
                                                         **subscriber_kwargs)
                 publisher_job.meta['rq_chains_successors'].append(subscriber_job.id)
@@ -131,10 +148,29 @@ class subscriber(ChainsJobDecorator):  # noqa
             subscribe_condition: Callable[[Any], Any] = lambda x: True,  # Default: always true
             depth_limit: Optional[int] = 1000,
             delay_timedelta: Optional[int | float | timedelta] = None,
-            # meta: Optional[Dict[Any, Any]] = None,
             **job_kwargs
     ):
-        # meta = _rq_chains_meta(meta)
+        """
+        A decorator class for RQ jobs to implement the subscriber functionality in a publisher-subscriber model.
+
+        Args:
+            queue (Union[Queue, str]): The RQ queue instance or queue name to enqueue the job.
+            channel_ids (Optional[Union[str, Iterable[str]]], optional): An iterable of channel IDs to subscribe to
+                or a single channel ID as a string. Defaults to None.
+            result_mapper (Callable[[Any], Any], optional): A function that maps the publisher's result
+                to the subscriber's arguments and keyword arguments. Defaults to a function returning the result
+                as the first argument.
+            subscribe_condition (Callable[[Any], Any], optional): A function that determines whether the subscriber
+                should be executed based on the publisher's result. Defaults to always True.
+            depth_limit (Optional[int], optional): The maximum depth of job chains that can be created
+                by chained publishers and subscribers. Defaults to 1000.
+            delay_timedelta (Optional[Union[int, float, timedelta]], optional): The time duration to delay the job
+                execution, can be a number of seconds (int or float) or a timedelta object. Defaults to None.
+            **job_kwargs: Additional keyword arguments to pass to the RQ job decorator.
+
+        Returns:
+            A RQ job wrapped function that subscribes to the specified channels.
+        """
         self.channel_ids = _process_channel_ids(channel_ids)
         self.result_mapper = result_mapper
         self.subscribe_condition = subscribe_condition
@@ -164,19 +200,6 @@ def _process_channel_ids(channel_ids: Optional[Union[str, Iterable[str]]]):
     if isinstance(channel_ids, str):
         return channel_ids,
     return tuple(*channel_ids)
-
-
-def walk_job_chain(parent_job: "Job", depth=0):
-    parent_job = Job.fetch(parent_job.id, connection=parent_job.connection)
-    successors, channel_id = parent_job.meta.get('rq_chains_successors', []), \
-                             parent_job.meta.get('rq_chains_channel_id', [])
-
-    ident = "  " * depth
-    print(
-        f"{ident}{parent_job.func_name}(*{parent_job.args}, **{parent_job.kwargs})={parent_job.return_value()}, {channel_id=}")
-    for successor in successors:
-        successor_job = Job.fetch(successor, connection=parent_job.connection)
-        walk_job_chain(successor_job, depth=depth + 1)
 
 
 def _default_publish_condition(result):
