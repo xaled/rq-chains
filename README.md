@@ -1,5 +1,5 @@
 # RQ Chains
-RQ Chains is a Python library that extends [RQ (Redis Queue)](https://python-rq.org/) with a publisher-subscriber model for job chains.
+RQ Chains is a tiny Python library that extends [RQ (Redis Queue)](https://python-rq.org/) with a publisher-subscriber model for job chains.
 It allows jobs to publish results to channels and other jobs to subscribe to these channels to receive the results.
 This enables the creation of chains of jobs where the output of one job is the input of the next.
 
@@ -10,19 +10,20 @@ pip install rq-chains
 
 ## Quick Start
 ```python
-# module.py
+# test_module.py
 from rq import Queue
 from redis import Redis
-from rq_chains import publisher, subscriber, walk_job_chain
-from time import sleep
+from rq_chains import publisher, subscriber
 
-redis_conn = Redis()
+redis_conn = Redis(host='redis')
 q = Queue(connection=redis_conn)
+
 
 # Define a function that will publish results
 @publisher(queue=q, channel_ids='add_result_channel')
 def add(a, b):
     return a + b
+
 
 # Define a function that will subscribe to the published results
 @subscriber(queue=q, channel_ids='add_result_channel')
@@ -32,18 +33,21 @@ def square(n):
 
 # main.py
 from test_module import add
+from rq_chains import walk_job_chain
+from time import sleep
+
 j = add.delay(2, 3)
 sleep(1)
-walk_job_chain(j) # Recursively walks through a job chain and prints information about each job in the chain
-# square will automatically be called with the published result (5), and it will compute and return 25.
+walk_job_chain(j)
+# Recursively walks through a job chain and prints information about each job in the chain
 # output:
 # test_module.add(*(2, 3), **{}) = 5
 #   test_module.square(*(5,), **{}) = 25 (channel_id='add_result_channel')
 
-
 ```
 
-In this example, when you call `add.delay(2, 3)`, it will compute the result (5) and publish it to 'channel1'. The `square` function is a subscriber to 'channel1', so it will automatically be called with the published result (5), and it will compute and return 25.
+In this example, when you call `add.delay(2, 3)`, it will compute the result (5) and publish it to 'add_result_channel'.
+The `square` function is a subscriber to 'add_result_channel', so it will automatically be called with the published result (5), and it will compute and return 25.
 
 ## Advanced Usage
 RQ Chains offers extra features to tailor the behavior of publishers and subscribers.
