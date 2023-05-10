@@ -133,6 +133,7 @@ class publisher(ChainsJobDecorator):  # noqa
         def wrapper(*args, **kwargs):
             result = f(*args, **kwargs)
             f.publish_result(result)
+            return result
 
         f.publish_result = publish_result
 
